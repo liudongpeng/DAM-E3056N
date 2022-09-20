@@ -250,14 +250,18 @@ BOOL ParseData(uint16_t* rawDataArr, double* targetDataArr, int n)
  */
 BOOL AIChannelMnoitor()
 {
-	#define NPN_OPEN	1
-	#define NPN_CLOSE	0
+#define NPN_OPEN	1
+#define NPN_CLOSE	0
 
-	#define DOUT0	0
-	#define DOUT1	1
-	#define DOUT2	2
-	#define DOUT3	3
-	#define DOUT4	4
+#define DOUT0	0
+#define DOUT1	1
+#define DOUT2	2
+#define DOUT3	3
+#define DOUT4	4
+
+	//BYTE DOUTChannelArr[5] = {0};
+	/* 获取各DOUT通道当前状态 */
+	//DAME3000N_DOGetValue(gs_dev, DOUTChannelArr, 0, 4);
 
 	/*
 	 * A0~A2：	任意一路 小于180V 或 大于280V
@@ -273,20 +277,21 @@ BOOL AIChannelMnoitor()
 	 *
 	 * 注意：		DOUT口接外部上拉，B基极给低电压，NPN三极管不导通，DOUT口输出高电压
 	 */
-	if (	(gs_targetData[AIN_A_ACV_INDEX] >= 180 && gs_targetData[AIN_A_ACV_INDEX] <= 280) &&
-			(gs_targetData[AIN_B_ACV_INDEX] >= 180 && gs_targetData[AIN_B_ACV_INDEX] <= 280) &&
-			(gs_targetData[AIN_C_ACV_INDEX] >= 180 && gs_targetData[AIN_C_ACV_INDEX] <= 280) &&
-
-			(gs_targetData[OUT_DCV_INDEX] >= 600 && gs_targetData[OUT_DCV_INDEX] <= 800) &&
-
-			(gs_targetData[OUT_DCI_INDEX] <= 690)
-	   )
+	if ((gs_targetData[AIN_A_ACV_INDEX] >= 180.0 && gs_targetData[AIN_A_ACV_INDEX] <= 280.0) &&
+			(gs_targetData[AIN_B_ACV_INDEX] >= 180.0 && gs_targetData[AIN_B_ACV_INDEX] <= 280.0) &&
+			(gs_targetData[AIN_C_ACV_INDEX] >= 180.0 && gs_targetData[AIN_C_ACV_INDEX] <= 280.0) &&
+			(gs_targetData[OUT_DCV_INDEX] >= 600.0 && gs_targetData[OUT_DCV_INDEX] <= 800.0) &&
+			(gs_targetData[OUT_DCI_INDEX] <= 690.0))
 	{
 		/* AI通道测量的数据都是符合标准的，状态正常 */
 
 		/* 设备工作状态栏用 绿色大号字体显示“正常” */
 		SetCtrlAttribute(panelHandle, PANEL_STRING_WORK_STATE, ATTR_TEXT_COLOR, VAL_GREEN);
 		SetCtrlVal(panelHandle, PANEL_STRING_WORK_STATE, "正常");
+
+		/* D0、D1立刻同时关断 */
+		DAME3000N_DOSetValue_Line(gs_dev, NPN_CLOSE, DOUT0);
+		DAME3000N_DOSetValue_Line(gs_dev, NPN_CLOSE, DOUT1);
 
 		/* A7大于10A，D2接通 */
 		if (gs_targetData[OUT_DCI_INDEX] >= 10)
@@ -299,6 +304,9 @@ BOOL AIChannelMnoitor()
 		{
 			DAME3000N_DOSetValue_Line(gs_dev, NPN_OPEN, DOUT3);
 		}
+
+		/* A6大于600V且小于800V，D4关断 */
+		DAME3000N_DOSetValue_Line(gs_dev, NPN_CLOSE, DOUT4);
 	}
 	else
 	{
@@ -312,10 +320,21 @@ BOOL AIChannelMnoitor()
 		DAME3000N_DOSetValue_Line(gs_dev, NPN_OPEN, DOUT0);
 		DAME3000N_DOSetValue_Line(gs_dev, NPN_OPEN, DOUT1);
 
-		/* A6小于600V或大于800V，D4接通 */
+		/* A6小于600V或大于800V，D4接通，D3关断 */
 		if (gs_targetData[OUT_DCV_INDEX] < 600 || gs_targetData[OUT_DCV_INDEX] > 800)
 		{
+			DAME3000N_DOSetValue_Line(gs_dev, NPN_CLOSE, DOUT3);
 			DAME3000N_DOSetValue_Line(gs_dev, NPN_OPEN, DOUT4);
+		}
+
+		/* A7大于10A，D2接通，小于10A，D2关断 */
+		if (gs_targetData[OUT_DCI_INDEX] >= 10)
+		{
+			DAME3000N_DOSetValue_Line(gs_dev, NPN_OPEN, DOUT2);
+		}
+		else
+		{
+			DAME3000N_DOSetValue_Line(gs_dev, NPN_CLOSE, DOUT2);
 		}
 	}
 
@@ -376,11 +395,19 @@ int CVICALLBACK SamplingThread(void *functionData)
 
 			/* 监测各通道电压上下限 */
 			/*
-			 * A0~A2：	任意一路 小于180V 或 大于280V
-			 * A6：		小于600V 或 大于800V
-			 * A7：		大于690A
-			 * 以上任意一路满足要求，则D0, D1立刻同时接通，切断电源以免发生危险
-			 */
+			* A0~A2：	任意一路 小于180V 或 大于280V
+			* A6：		小于600V 或 大于800V
+			* A7：		大于690A
+			* 以上任意一路满足要求，则D0, D1立刻同时接通，切断电源以免发生危险
+			*
+			* A7：		大于10A，D2接通
+			*
+			* A6：		在600V到800V之间，D3接通
+			*
+			* A6：		小于600V或大于800V，D4接通
+			*
+			* 注意：		DOUT口接外部上拉，B基极给低电压，NPN三极管不导通，DOUT口输出高电压
+			*/
 			AIChannelMnoitor();
 
 			/* 在用户界面对应的位置显示解析后的数据 */
@@ -425,7 +452,10 @@ int CVICALLBACK CheckConnectThread(void *functionData)
 				/* 设备连接状态的红色指示灯亮 */
 				SetCtrlAttribute(panelHandle, PANEL_LED_CONNECT_STATE, ATTR_ON_COLOR, VAL_RED);
 				SetCtrlVal(panelHandle, PANEL_LED_CONNECT_STATE, 1);
-
+				/* 设备工作状态栏用 红色大号字体显示“故障” */
+				SetCtrlAttribute(panelHandle, PANEL_STRING_WORK_STATE, ATTR_TEXT_COLOR, VAL_RED);
+				SetCtrlVal(panelHandle, PANEL_STRING_WORK_STATE, "故障");
+				
 				/* 释放设备资源 */
 				CloseDevice(gs_dev);
 				gs_dev = (void*)-1;
@@ -489,7 +519,7 @@ void SetAIChannelRangeVoltN0P5()
 	{
 		AIChannelRangeArr[i] = DAME3000N_VOLT_N0_P5;
 	}
-	
+
 	/* 设置各通道量程 */
 	SetAIChannelRange(gs_dev, AIChannelRangeArr, 0, 7);
 }
