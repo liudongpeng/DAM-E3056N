@@ -974,6 +974,7 @@ extern "C" {
 #endif
 #endif
 
+/*
 // 自动包含驱动函数导入库
 #ifndef _DAME3000N_DRIVER_
 #ifndef _WIN64
@@ -982,3 +983,4 @@ extern "C" {
 #pragma comment(lib, "DAME3000N_64.lib")
 #endif // _WIN64
 #endif // _DAME3000N_DRIVER_
+*/
